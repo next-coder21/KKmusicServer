@@ -1,0 +1,37 @@
+# Node.js dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Output directories
+dist/
+build/
+.cache/
+
+# Database and session storage
+*.sqlite
+*.db
+sessions/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Test coverage reports
+/coverage
+
+# Exclude local environment files but keep `.env`
+.env.local
+.env.development
+.env.test
+.env.production
