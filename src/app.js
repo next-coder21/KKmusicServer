@@ -11,7 +11,7 @@ const favouriteRoute = require("./routes/favouriteRoutes")
 const app = express();
 
 app.use(cors({
-  origin: ["http://localhost:5173", "http://192.168.43.254:5173","https://k-kmusic.vercel.app/login"], 
+  origin: ["http://localhost:5173", "http://192.168.43.254:5173","https://k-kmusic.vercel.app"], 
   credentials: true, // Allow cookies
   methods: ["GET", "POST", "PUT", "DELETE"], // ✅ Explicitly allow methods
   allowedHeaders: ["Content-Type", "Authorization"], // ✅ Allow headers
