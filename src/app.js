@@ -4,7 +4,7 @@ const cookieParser = require("cookie-parser"); // ✅ Import cookie-parser
 require("dotenv").config();
 
 const authRoutes = require("./routes/authRoutes");
-const musicRoutes = require("./routes/musicroutes");
+const musicRoutes = require("./routes/musicRoutes");
 const queueRoutes = require("./routes/queueRoutes")
 const favouriteRoute = require("./routes/favouriteRoutes")
 
