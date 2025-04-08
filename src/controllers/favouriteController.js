@@ -32,7 +32,7 @@ exports.addFavourites = async (req, res) => {
 
         const result = await pool.query(query, values);
 
-        res.json({ message: "Favourite updated", data: result.rows[0] });
+        res.json({ status:"success", message: "Favourite updated", data: result.rows[0] });
     } catch (error) {
         console.error("Error updating favourites:", error);
         res.status(500).json({ error: "Internal server error" });
@@ -66,31 +66,36 @@ exports.addFavourites = async (req, res) => {
   
   // ✅ Remove Song(s) from Favourites
   exports.removeFavourites = async (req, res) => {
+    console.log("Touched Remove Favourites");
+    
     const { email, songIds } = req.body;
-  
+
+    console.log("From remove", email, songIds);
+    
     if (!email || !Array.isArray(songIds) || songIds.length === 0) {
-      return res.status(400).json({ error: "Invalid request. Email and song IDs are required." });
+        return res.status(400).json({ error: "Invalid request. Email and song IDs are required." });
     }
-  
+
     try {
-      const query = `
-        UPDATE favourites
-        SET song_ids = array_remove(song_ids, unnest($2::UUID[]))
-        WHERE user_email = $1
-        RETURNING *;
-      `;
-  
-      const values = [email, songIds];
-  
-      const result = await pool.query(query, values);
-  
-      if (result.rowCount === 0) {
-        return res.status(404).json({ error: "No favourites found for this user." });
-      }
-  
-      res.json({ message: "Removed from favourites", data: result.rows[0] });
+        const query = `
+            UPDATE favourites
+            SET song_ids = array_remove(song_ids, s.id)
+            FROM (SELECT unnest($2::UUID[]) AS id) AS s
+            WHERE user_email = $1
+            RETURNING *;
+        `;
+
+        const values = [email, songIds];
+
+        const result = await pool.query(query, values);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: "No favourites found for this user." });
+        }
+
+        res.json({ status:"success", message: "Removed from favourites", data: result.rows[0] });
     } catch (error) {
-      console.error("Error removing from favourites:", error);
-      res.status(500).json({ error: "Internal server error" });
+        console.error("Error removing from favourites:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
-  };
+};

@@ -88,7 +88,7 @@ exports.login = async (req, res) => {
     // ✅ Store JWT in an HTTP-only cookie
     res.cookie("token", token, {
       httpOnly: true,  
-      secure: process.env.NODE_ENV === "production", // ✅ Secure in production
+      secure: process.env.NODE_ENV , // ✅ Secure in production
       sameSite: "Strict",  // ✅ Better CSRF protection
       maxAge: 7 * 24 * 60 * 60 * 1000, 
     });
