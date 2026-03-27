@@ -1,10 +1,14 @@
 const express = require("express");
-const router = express.Router();
+const router  = express.Router();
 const musicController = require("../controllers/musicController");
+const { authMiddleware } = require("../middleware/authMiddleware");
 
-// API Routes
-router.get("/songs", musicController.getAllSongs);
-router.get("/songs/:id", musicController.getSongById);
-router.get("/stream/:id", musicController.streamAudio);
+router.get("/songs",              musicController.getAllSongs);
+router.get("/albums",             musicController.getAllAlbums);
+router.get("/artists",            musicController.getAllArtists);
+router.get("/genres",             musicController.getAllGenres);
+router.get("/songs/:id",          musicController.getSongById);
+router.get("/stream/:id",         musicController.streamAudio);
+router.post("/record-play/:id",   authMiddleware, musicController.recordPlay);
 
 module.exports = router;

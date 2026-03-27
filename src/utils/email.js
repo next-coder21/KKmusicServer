@@ -11,14 +11,15 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-exports.sendEmail = async (to, subject, body, htmlBody = null) => {
+exports.sendEmail = async (to, subject, body, htmlBody = null, attachments = []) => {
   try {
     const mailOptions = {
       from: `"Muves - KK music application" <${process.env.EMAIL_USER}>`, // Sender's name
       to,
       subject,
       text: body, // Plain text fallback
-      html: htmlBody || `<p>${body}</p>` // Supports HTML
+      html: htmlBody || `<p>${body}</p>`, // Supports HTML
+      attachments // { filename, content, cid, contentType }
     };
 
     const info = await transporter.sendMail(mailOptions);
