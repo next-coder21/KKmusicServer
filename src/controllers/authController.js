@@ -227,7 +227,15 @@ exports.updateAccount = async (req, res) => {
 // BUG FIX: was using decoded.userId — JWT is signed with { id, email, name }
 exports.checkAuth = async (req, res) => {
   try {
-    const token = req.cookies.token;
+    let token = req.cookies.token;
+
+    // Fallback to Authorization header if cookie is missing (common on cross-site Vercel/Render)
+    if (!token && req.headers.authorization) {
+      if (req.headers.authorization.startsWith("Bearer ")) {
+        token = req.headers.authorization.split(" ")[1];
+      }
+    }
+
     if (!token) return res.status(401).json({ error: "Not authenticated" });
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
