@@ -9,17 +9,20 @@ const queueRoutes = require("./routes/queueRoutes")
 const favouriteRoute = require("./routes/favouriteRoutes")
 
 const app = express();
+app.set("trust proxy", 1); // ✅ Trust Render proxy for cookies
 
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://192.168.43.254:5173",
-  "https://k-kmusic.vercel.app"
+  "https://k-kmusic.vercel.app",
+  "https://muves-website.vercel.app"
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow local development and specific Vercel domains
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".vercel.app")) {
       callback(null, true);
     } else {
       callback(new Error(`CORS blocked: ${origin}`));
