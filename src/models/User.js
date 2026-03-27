@@ -25,6 +25,7 @@ const createTables = async () => {
   `;
 
   try {
+    await pool.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
     await pool.query(userTableQuery);
     console.log('✅ Users table is ready.');
 
