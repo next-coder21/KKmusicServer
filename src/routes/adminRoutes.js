@@ -58,4 +58,8 @@ router.post("/ads", adController.addAd);
 router.patch("/ads/:id", adController.updateAd);
 router.delete("/ads/:id", adController.deleteAd);
 
+// Lyrics Generator (Groq + Whisper)
+const lyricgenController = require("../controllers/lyricgenController");
+router.post("/lyricgen", lyricgenController.generateLyrics);
+
 module.exports = router;
