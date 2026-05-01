@@ -9,14 +9,12 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ── Public auth ──────────────────────────────────────────────────────────────
-router.post("/register",        authController.register);
-router.post("/verify",          authController.verifyEmail);
-router.post("/resend-otp",      authController.resendOtp);
-router.post("/login",           authController.login);
-router.post("/forgot-password", authController.forgotPassword);
-router.post("/reset-password",  authController.resetPassword);
-router.post("/logout",          authController.logout);
-router.get ("/check-auth",      authMiddleware, authController.checkAuth);
+router.post("/register",          authController.register);
+router.post("/login",             authController.login);
+router.post("/verify-security",   authController.verifySecurityAnswer);
+router.post("/reset-password",    authController.resetPassword);
+router.post("/logout",            authController.logout);
+router.get ("/check-auth",        authMiddleware, authController.checkAuth);
 
 // ── Public Ads ───────────────────────────────────────────────────────────────
 const adController = require("../controllers/adController");

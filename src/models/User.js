@@ -35,6 +35,10 @@ const createTables = async () => {
     await pool.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
     `).catch(() => {});
+    // Security answer replaces OTP email verification
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS security_answer VARCHAR(255);
+    `).catch(() => {});
     console.log('✅ Users table is ready.');
 
     await pool.query(userProfileTableQuery);
