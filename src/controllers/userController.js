@@ -96,7 +96,8 @@ exports.getUserTopGenres = async (req, res) => {
 exports.search = async (req, res) => {
   try {
     const { q } = req.query;
-    if (!q||!q.trim()) return res.json({ songs:[], artists:[], albums:[] });
+    if (!q || !q.trim()) return res.json({ songs: [], artists: [], albums: [] });
+    if (q.trim().length > 100) return res.status(400).json({ error: "Search query too long" });
     const p = `%${q.trim()}%`;
     const [songs, artists, albums] = await Promise.all([
       pool.query(`SELECT s.id,s.title,s.cover_url,s.duration_seconds,s.play_count,a.name AS artist_name,al.title AS album_title FROM songs s LEFT JOIN artists a ON s.artist_id=a.id LEFT JOIN albums al ON s.album_id=al.id WHERE s.title ILIKE $1 OR a.name ILIKE $1 ORDER BY s.play_count DESC NULLS LAST LIMIT 20`, [p]),

@@ -4,7 +4,6 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
-const rateLimit = require("express-rate-limit");
 
 const authRoutes = require("./routes/authRoutes");
 const musicRoutes = require("./routes/musicRoutes");
@@ -75,35 +74,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(cookieParser());
 
-// ───────────────────────────────────────────────────────────────
-// Rate limiting — strict on auth, looser everywhere else.
-// Works correctly behind a single proxy thanks to trust proxy=1.
-// ───────────────────────────────────────────────────────────────
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,        // 15 minutes
-  max: 10,                          // 10 attempts per IP per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many attempts. Try again in a few minutes." },
-});
-
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,              // 1 minute
-  max: 200,                         // 200 requests per IP per minute
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Tighten the brute-force-prone endpoints first.
-app.use("/auth/login", authLimiter);
-app.use("/auth/register", authLimiter);
-app.use("/auth/forgot-password", authLimiter);
-app.use("/auth/reset-password", authLimiter);
-app.use("/auth/verify", authLimiter);
-app.use("/admin/login", authLimiter);
-
-// General throttle on the rest.
-app.use(apiLimiter);
+// Rate limiting removed — re-enable when needed.
 
 // ───────────────────────────────────────────────────────────────
 // Routes

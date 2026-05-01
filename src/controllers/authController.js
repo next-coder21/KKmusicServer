@@ -5,8 +5,17 @@ const { sendEmail } = require('../utils/email');
 const multer = require("multer");
 require('dotenv').config();
 
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2 MB
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_TYPES.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("Only JPEG, PNG, or WebP images are allowed"));
+  },
+});
 
 const cookieOptions = () => ({
   httpOnly: true,
@@ -18,6 +27,14 @@ const cookieOptions = () => ({
 // ─── Register ───────────────────────────────────────────────────────────────
 exports.register = async (req, res) => {
   const { name, email, password } = req.body;
+
+  if (!name || !name.trim())
+    return res.status(400).json({ error: 'Name is required' });
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    return res.status(400).json({ error: 'Valid email is required' });
+  if (!password || password.length < 8)
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
   try {
     const exists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (exists.rows.length > 0)
@@ -25,23 +42,30 @@ exports.register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
 
     await pool.query(
-      'INSERT INTO users (name, email, password, otp) VALUES ($1, $2, $3, $4)',
-      [name, email, hashedPassword, otp]
+      'INSERT INTO users (name, email, password, otp, otp_expires_at) VALUES ($1, $2, $3, $4, $5)',
+      [name.trim(), email.toLowerCase(), hashedPassword, otp, otpExpiresAt]
     );
 
-    await sendEmail(
-      email,
-      'Verify your Muves account',
-      `Your OTP: ${otp}`,
-      `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;">
-        <h2 style="color:#6c5ce7">Verify your email</h2>
-        <p>Your one-time verification code:</p>
-        <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#6c5ce7;padding:16px 0">${otp}</div>
-        <p style="color:#888;font-size:13px">This code expires in 30 minutes.</p>
-      </div>`
-    );
+    try {
+      await sendEmail(
+        email,
+        'Verify your Muves account',
+        `Your OTP: ${otp}`,
+        `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;">
+          <h2 style="color:#6c5ce7">Verify your email</h2>
+          <p>Your one-time verification code:</p>
+          <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#6c5ce7;padding:16px 0">${otp}</div>
+          <p style="color:#888;font-size:13px">This code expires in 30 minutes.</p>
+        </div>`
+      );
+    } catch (emailErr) {
+      console.error('Register: failed to send verification email:', emailErr);
+      await pool.query('DELETE FROM users WHERE email = $1', [email]);
+      return res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
+    }
 
     res.status(201).json({ message: 'Registration successful. Check your email for the OTP.' });
   } catch (error) {
@@ -53,12 +77,18 @@ exports.register = async (req, res) => {
 // ─── Verify Email ────────────────────────────────────────────────────────────
 exports.verifyEmail = async (req, res) => {
   const { email, otp } = req.body;
+  if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
   try {
-    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
     if (user.rows.length === 0) return res.status(400).json({ error: 'Invalid email' });
-    if (String(user.rows[0].otp) !== String(otp)) return res.status(400).json({ error: 'Invalid OTP' });
 
-    await pool.query('UPDATE users SET is_verified = TRUE, otp = NULL WHERE email = $1', [email]);
+    const row = user.rows[0];
+    if (row.otp_expires_at && new Date(row.otp_expires_at) < new Date())
+      return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
+    if (String(row.otp) !== String(otp))
+      return res.status(400).json({ error: 'Invalid OTP' });
+
+    await pool.query('UPDATE users SET is_verified = TRUE, otp = NULL, otp_expires_at = NULL WHERE email = $1', [email.toLowerCase()]);
     res.json({ message: 'Email verified successfully' });
   } catch (error) {
     res.status(400).json({ error: 'Verification failed' });
@@ -68,23 +98,31 @@ exports.verifyEmail = async (req, res) => {
 // ─── Resend OTP ──────────────────────────────────────────────────────────────
 exports.resendOtp = async (req, res) => {
   const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
   try {
-    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
     if (user.rows.length === 0) return res.status(400).json({ error: 'User not found' });
     if (user.rows[0].is_verified) return res.status(400).json({ error: 'Email already verified' });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    await pool.query('UPDATE users SET otp = $1 WHERE email = $2', [otp, email]);
+    const otpExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await pool.query('UPDATE users SET otp = $1, otp_expires_at = $2 WHERE email = $3', [otp, otpExpiresAt, email.toLowerCase()]);
 
-    await sendEmail(
-      email,
-      'Your new verification OTP',
-      `Your new OTP: ${otp}`,
-      `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;">
-        <h2 style="color:#6c5ce7">New Verification Code</h2>
-        <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#6c5ce7;padding:16px 0">${otp}</div>
-      </div>`
-    );
+    try {
+      await sendEmail(
+        email,
+        'Your new verification OTP',
+        `Your new OTP: ${otp}`,
+        `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;">
+          <h2 style="color:#6c5ce7">New Verification Code</h2>
+          <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#6c5ce7;padding:16px 0">${otp}</div>
+          <p style="color:#888;font-size:13px">This code expires in 30 minutes.</p>
+        </div>`
+      );
+    } catch (emailErr) {
+      console.error('ResendOtp: failed to send email:', emailErr);
+      return res.status(500).json({ error: 'Failed to send OTP email. Please try again.' });
+    }
 
     res.json({ message: 'New OTP sent to your email' });
   } catch (error) {
@@ -144,24 +182,34 @@ exports.login = async (req, res) => {
 // ─── Forgot Password ─────────────────────────────────────────────────────────
 exports.forgotPassword = async (req, res) => {
   const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
   try {
-    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (user.rows.length === 0) return res.status(400).json({ error: 'User not found' });
+    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+    // Return generic message to prevent email enumeration
+    if (user.rows.length === 0)
+      return res.json({ message: 'If that email exists, a reset code has been sent.' });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    await pool.query('UPDATE users SET otp = $1 WHERE email = $2', [otp, email]);
+    const otpExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await pool.query('UPDATE users SET otp = $1, otp_expires_at = $2 WHERE email = $3', [otp, otpExpiresAt, email.toLowerCase()]);
 
-    await sendEmail(
-      email,
-      'Reset your Muves password',
-      `Your OTP to reset password: ${otp}`,
-      `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;">
-        <h2 style="color:#6c5ce7">Reset Password</h2>
-        <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#6c5ce7;padding:16px 0">${otp}</div>
-      </div>`
-    );
+    try {
+      await sendEmail(
+        email,
+        'Reset your Muves password',
+        `Your OTP to reset password: ${otp}`,
+        `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;">
+          <h2 style="color:#6c5ce7">Reset Password</h2>
+          <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#6c5ce7;padding:16px 0">${otp}</div>
+          <p style="color:#888;font-size:13px">This code expires in 30 minutes.</p>
+        </div>`
+      );
+    } catch (emailErr) {
+      console.error('ForgotPassword: failed to send email:', emailErr);
+      return res.status(500).json({ error: 'Failed to send reset email. Please try again.' });
+    }
 
-    res.json({ message: 'Password reset OTP sent to your email' });
+    res.json({ message: 'If that email exists, a reset code has been sent.' });
   } catch (error) {
     res.status(500).json({ error: 'Error sending reset link' });
   }
@@ -170,13 +218,22 @@ exports.forgotPassword = async (req, res) => {
 // ─── Reset Password ──────────────────────────────────────────────────────────
 exports.resetPassword = async (req, res) => {
   const { email, otp, newPassword } = req.body;
+  if (!email || !otp || !newPassword)
+    return res.status(400).json({ error: 'Email, OTP, and new password are required' });
+  if (newPassword.length < 8)
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
   try {
-    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
     if (user.rows.length === 0) return res.status(400).json({ error: 'User not found' });
-    if (String(user.rows[0].otp) !== String(otp)) return res.status(400).json({ error: 'Invalid OTP' });
+
+    const row = user.rows[0];
+    if (row.otp_expires_at && new Date(row.otp_expires_at) < new Date())
+      return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
+    if (String(row.otp) !== String(otp))
+      return res.status(400).json({ error: 'Invalid OTP' });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password = $1, otp = NULL WHERE email = $2', [hashedPassword, email]);
+    await pool.query('UPDATE users SET password = $1, otp = NULL, otp_expires_at = NULL WHERE email = $2', [hashedPassword, email.toLowerCase()]);
     res.json({ message: 'Password updated successfully' });
   } catch (error) {
     res.status(400).json({ error: 'Error resetting password' });
@@ -186,8 +243,8 @@ exports.resetPassword = async (req, res) => {
 // ─── Update Account ──────────────────────────────────────────────────────────
 exports.updateAccount = async (req, res) => {
   try {
-    // Use authenticated user's email from JWT (secure) + allow body fallback
-    const email = req.user?.email || req.body.email;
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ error: "Unauthorized" });
     const { name, dob, gender } = req.body;
     const image = req.file ? req.file.buffer.toString("base64") : null;
 
@@ -224,7 +281,6 @@ exports.updateAccount = async (req, res) => {
 };
 
 // ─── Check Auth ───────────────────────────────────────────────────────────────
-// BUG FIX: was using decoded.userId — JWT is signed with { id, email, name }
 exports.checkAuth = async (req, res) => {
   try {
     let token = req.cookies.token;
@@ -248,7 +304,6 @@ exports.checkAuth = async (req, res) => {
       WHERE u.id = $1
     `;
 
-    // FIX: decoded.id (not decoded.userId)
     const user = await pool.query(userQuery, [decoded.id]);
 
     if (user.rows.length === 0) return res.status(401).json({ error: "Invalid token" });

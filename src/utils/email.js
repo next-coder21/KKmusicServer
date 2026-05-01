@@ -12,21 +12,15 @@ const transporter = nodemailer.createTransport({
 });
 
 exports.sendEmail = async (to, subject, body, htmlBody = null, attachments = []) => {
-  try {
-    const mailOptions = {
-      from: `"Muves - KK music application" <${process.env.EMAIL_USER}>`, // Sender's name
-      to,
-      subject,
-      text: body, // Plain text fallback
-      html: htmlBody || `<p>${body}</p>`, // Supports HTML
-      attachments // { filename, content, cid, contentType }
-    };
+  const mailOptions = {
+    from: `"Muves - KK music application" <${process.env.EMAIL_USER}>`,
+    to,
+    subject,
+    text: body,
+    html: htmlBody || `<p>${body}</p>`,
+    attachments,
+  };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${to}: ${info.messageId}`);
-    return true;
-  } catch (error) {
-    console.error(`❌ Error sending email to ${to}:`, error);
-    return false;
-  }
+  const info = await transporter.sendMail(mailOptions);
+  console.log(`✅ Email sent to ${to}: ${info.messageId}`);
 };

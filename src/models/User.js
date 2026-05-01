@@ -27,6 +27,14 @@ const createTables = async () => {
   try {
     await pool.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
     await pool.query(userTableQuery);
+    // Add otp_expires_at column to existing deployments that predate this migration
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP;
+    `).catch(() => {});
+    // Add is_active column to existing deployments that predate this migration
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+    `).catch(() => {});
     console.log('✅ Users table is ready.');
 
     await pool.query(userProfileTableQuery);
