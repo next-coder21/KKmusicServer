@@ -76,10 +76,15 @@ async function migrate() {
         
         for (const row of rows) {
           const values = fields.map(f => row[f.name]);
-          await client.query(
-            `INSERT INTO ${table} (${columns}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
-            values
-          );
+          let query = `INSERT INTO ${table} (${columns}) VALUES (${placeholders})`;
+          
+          if (table === 'songs') {
+            query += ` ON CONFLICT (id) DO UPDATE SET lyrics = EXCLUDED.lyrics`;
+          } else {
+            query += ` ON CONFLICT DO NOTHING`;
+          }
+          
+          await client.query(query, values);
         }
         
         await client.query('COMMIT');

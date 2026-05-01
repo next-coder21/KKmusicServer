@@ -17,8 +17,11 @@ router.get("/stats", adminController.getDashboardStats);
 // Songs
 router.get("/songs",          adminController.getSongs);
 router.post("/songs",         adminController.addSong);
-router.patch("/songs/:id",    adminController.updateSong);   // ← album/artist mapping
+router.patch("/songs/:id",    adminController.updateSong);
 router.delete("/songs/:id",   adminController.deleteSong);
+
+// Genres (read-only for dropdowns)
+router.get("/genres",         adminController.getGenres);
 
 // Artists
 router.get("/artists", adminController.getArtists);

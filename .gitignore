@@ -30,8 +30,9 @@ Thumbs.db
 # Test coverage reports
 /coverage
 
-# Exclude local environment files but keep `.env`
-.env.local
-.env.development
-.env.test
-.env.production
+# Environment files — NEVER commit secrets.
+# Only the example file should be tracked.
+
+
+# Misc archives / temp dumps
+*.zip

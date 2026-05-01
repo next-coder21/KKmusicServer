@@ -60,6 +60,7 @@ exports.getAllSongs = async (req, res) => {
       LEFT JOIN artists a  ON s.artist_id = a.id
       LEFT JOIN albums  al ON s.album_id  = al.id
       LEFT JOIN genres  g  ON s.genre_id  = g.id
+      WHERE s.is_visible IS NOT FALSE
       ORDER BY s.title ASC
     `);
     res.json(rows);

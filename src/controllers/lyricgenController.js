@@ -27,15 +27,19 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 const CONFIG = {
-  MUSIC_GAP_THRESHOLD: 3.0,     // seconds — gaps longer than this → "♪ Music ♪"
-  INTRO_THRESHOLD: 2.0,         // seconds — if first vocal starts after this → intro music
-  OUTRO_THRESHOLD: 5.0,         // seconds — gap at end → outro music
-  MAX_LINE_WORDS: 4,           // max words per lyric line
-  MIN_LINE_WORDS: 2,            // avoid single-word lines unless forced
-  PAUSE_THRESHOLD: 0.8,         // seconds — word gap that suggests line break
-  SENTENCE_PAUSE: 1.2,          // seconds — strong pause = definite line break
-  HALLUCINATION_RATIO: 0.75,    // similarity threshold to detect repeated segments
-  MIN_SEGMENT_CONFIDENCE: 0.15, // avg_logprob threshold for garbage segments
+  MUSIC_GAP_THRESHOLD: 3.0,
+  INTRO_THRESHOLD: 2.0,
+  OUTRO_THRESHOLD: 5.0,
+  MAX_LINE_WORDS: 4,
+  MIN_LINE_WORDS: 2,
+  PAUSE_THRESHOLD: 0.8,
+  SENTENCE_PAUSE: 1.2,
+  HALLUCINATION_RATIO: 0.75,
+  MIN_SEGMENT_CONFIDENCE: 0.15,
+  MAX_NO_SPEECH_PROB: 0.6,      // segments with higher value are music/silence, not vocals
+  MAX_COMPRESSION_RATIO: 2.2,   // lower = more aggressive hallucination filtering
+  MIN_WORD_PROBABILITY: 0.3,    // word-level confidence threshold
+  MAX_SCRIPT_MIX_RATIO: 0.5,   // if >50% chars are foreign-script in a non-Latin song, skip
 };
 
 // ─── Drive helpers ────────────────────────────────────────────────────────────
@@ -146,8 +150,9 @@ function formatTimestamp(ts) {
  * Whisper commonly hallucinates on instrumental sections by repeating
  * the same phrase or producing nonsense with high compression ratios.
  */
-function filterHallucinatedSegments(segments) {
+function filterHallucinatedSegments(segments, detectedLang = "") {
   if (segments.length < 2) return segments;
+  const isNonLatinLang = ["ta","hi","te","ml","kn","bn","ko","ja","zh","ar","ru"].includes(detectedLang);
 
   const filtered = [];
   let lastText = "";
@@ -182,17 +187,31 @@ function filterHallucinatedSegments(segments) {
       repeatCount = 0;
     }
 
-    // Check for abnormal compression ratio (hallucination indicator)
-    if (seg.compression_ratio && seg.compression_ratio > 2.8) {
-      console.log(`[LyricGen] Suspicious compression ratio (${seg.compression_ratio.toFixed(1)}): "${text}"`);
-      // Don't skip entirely — just flag it, as high ratio can be valid for choruses
+    // no_speech_prob: Whisper itself says this is not speech (music/silence)
+    if (seg.no_speech_prob != null && seg.no_speech_prob > CONFIG.MAX_NO_SPEECH_PROB) {
+      console.log(`[LyricGen] Filtered non-speech segment (no_speech_prob=${seg.no_speech_prob.toFixed(2)}): "${text}"`);
+      continue;
     }
 
-    // Check for very low confidence
-    if (seg.avg_logprob && seg.avg_logprob < -1.5) {
-      console.log(`[LyricGen] Low confidence segment (logprob=${seg.avg_logprob.toFixed(2)}): "${text}"`);
-      // Skip extremely low confidence
-      if (seg.avg_logprob < -2.5) continue;
+    // High compression ratio = repeated tokens = hallucination
+    if (seg.compression_ratio && seg.compression_ratio > CONFIG.MAX_COMPRESSION_RATIO) {
+      console.log(`[LyricGen] Filtered high compression ratio (${seg.compression_ratio.toFixed(1)}): "${text}"`);
+      continue;
+    }
+
+    // Very low confidence
+    if (seg.avg_logprob && seg.avg_logprob < -2.0) {
+      console.log(`[LyricGen] Filtered low confidence segment (logprob=${seg.avg_logprob.toFixed(2)}): "${text}"`);
+      continue;
+    }
+
+    // Mixed-script filter: Tamil/Hindi song shouldn't have mostly-English segments
+    if (isNonLatinLang) {
+      const latinChars = (text.match(/[a-zA-Z]/g) || []).length;
+      if (latinChars / text.length > CONFIG.MAX_SCRIPT_MIX_RATIO && text.length > 5) {
+        console.log(`[LyricGen] Filtered mixed-script segment: "${text}"`);
+        continue;
+      }
     }
 
     filtered.push({ ...seg, text: text });
@@ -595,20 +614,42 @@ exports.generateLyrics = async (req, res) => {
 
     // 4. Filter hallucinated segments
     const rawSegments = transcription.segments || [];
-    const cleanedSegments = filterHallucinatedSegments(rawSegments);
+    const cleanedSegments = filterHallucinatedSegments(rawSegments, transcription.language || "");
     console.log(
       `[LyricGen] Segments after filtering: ${cleanedSegments.length}/${rawSegments.length}`
     );
 
-    // 5. Extract word timestamps (cleaned)
+    // 5. Extract word timestamps (cleaned + confidence filtered)
     const rawWords = transcription.words || [];
+    const detectedLang = transcription.language || "";
+    const isNonLatinLang = ["ta","hi","te","ml","kn","bn","ko","ja","zh","ar","ru"].includes(detectedLang);
+
     const wordTimestamps = rawWords
       .map((w) => ({
         word: cleanWordText(w.word),
         start: w.start,
         end: w.end,
+        probability: w.probability,
       }))
-      .filter((w) => w.word && !isWhisperArtifact(w.word));
+      .filter((w) => {
+        if (!w.word || isWhisperArtifact(w.word)) return false;
+        // Drop low-probability words (hallucinated)
+        if (w.probability != null && w.probability < CONFIG.MIN_WORD_PROBABILITY) {
+          console.log(`[LyricGen] Dropped low-prob word (${w.probability.toFixed(2)}): "${w.word}"`);
+          return false;
+        }
+        // For non-Latin languages (Tamil, Hindi etc.), drop words that are
+        // mostly Latin characters — they're hallucinated English garbage
+        if (isNonLatinLang) {
+          const latinChars = (w.word.match(/[a-zA-Z]/g) || []).length;
+          const ratio = latinChars / w.word.length;
+          if (ratio > CONFIG.MAX_SCRIPT_MIX_RATIO && w.word.length > 2) {
+            console.log(`[LyricGen] Dropped mixed-script word: "${w.word}"`);
+            return false;
+          }
+        }
+        return true;
+      });
 
     if (wordTimestamps.length === 0 && cleanedSegments.length === 0) {
       return res.status(422).json({

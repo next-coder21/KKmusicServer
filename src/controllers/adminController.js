@@ -26,15 +26,30 @@ const initAdminTable = async () => {
       await pool.query(sql).catch(() => {}); // ignore if already exists
     }
 
-    // 3. Seed default admin if table is empty
+    // 3. Seed admin from env vars on first boot (skip if env is empty —
+    //    the operator can create one manually via the admin endpoint).
     const { rows } = await pool.query('SELECT COUNT(*) FROM admin_users');
-    if (parseInt(rows[0].count) === 0) {
-      const hash = await bcrypt.hash('admin123', 10);
-      await pool.query(
-        "INSERT INTO admin_users (email, password, name, role) VALUES ($1, $2, $3, $4)",
-        ['admin@kkmusic.com', hash, 'Super Admin', 'super_admin']
-      );
-      console.log('✅ Default admin created: admin@kkmusic.com / admin123');
+    if (parseInt(rows[0].count, 10) === 0) {
+      const seedEmail = process.env.ADMIN_EMAIL;
+      const seedPass  = process.env.ADMIN_PASSWORD;
+      const seedName  = process.env.ADMIN_NAME || 'Super Admin';
+
+      if (seedEmail && seedPass) {
+        if (seedPass.length < 12) {
+          console.warn('⚠ ADMIN_PASSWORD is weak (<12 chars). Use a stronger value in production.');
+        }
+        const hash = await bcrypt.hash(seedPass, 12);
+        await pool.query(
+          "INSERT INTO admin_users (email, password, name, role) VALUES ($1, $2, $3, $4)",
+          [seedEmail, hash, seedName, 'super_admin']
+        );
+        console.log(`✅ Seeded initial admin: ${seedEmail}`);
+      } else {
+        console.warn(
+          '⚠ admin_users is empty and ADMIN_EMAIL / ADMIN_PASSWORD are not set. ' +
+          'No admin will be auto-created. Set both env vars to seed one.'
+        );
+      }
     }
 
     console.log('✅ admin_users table ready.');
@@ -43,6 +58,19 @@ const initAdminTable = async () => {
   }
 };
 initAdminTable();
+
+// ─── Migrate songs table for new columns ──────────────────────────────────────
+const initSongsMigrations = async () => {
+  const migrations = [
+    `ALTER TABLE songs ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE`,
+    `ALTER TABLE songs ADD COLUMN IF NOT EXISTS genre_id   INTEGER REFERENCES genres(id) ON DELETE SET NULL`,
+    `ALTER TABLE songs ADD COLUMN IF NOT EXISTS lyrics     TEXT`,
+  ];
+  for (const sql of migrations) {
+    await pool.query(sql).catch(() => {});
+  }
+};
+initSongsMigrations();
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 exports.login = async (req, res) => {
@@ -73,7 +101,7 @@ exports.login = async (req, res) => {
       maxAge:   24 * 60 * 60 * 1000,
     });
 
-    res.json({ message: "Admin login successful", admin: { id: admin.id, name: admin.name, email: admin.email, role: admin.role } });
+    res.json({ message: "Admin login successful", token, admin: { id: admin.id, name: admin.name, email: admin.email, role: admin.role } });
   } catch (error) {
     console.error("Admin login error:", error);
     res.status(500).json({ error: "Login failed" });
@@ -81,7 +109,11 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = (req, res) => {
-  res.clearCookie("admin_token");
+  res.clearCookie("admin_token", {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+  });
   res.json({ message: "Logged out" });
 };
 
@@ -129,27 +161,47 @@ exports.getSongs = async (req, res) => {
       SELECT
         s.id, s.title, s.cover_url, s.audiourl,
         s.duration_seconds, s.play_count, s.is_explicit, s.created_at,
-        a.name     AS artist_name,
-        a.id       AS artist_id,
-        al.title   AS album_title,
-        al.id      AS album_id
+        COALESCE(s.is_visible, TRUE)  AS is_visible,
+        s.artist_id,  a.name          AS artist_name,
+        s.album_id,   al.title        AS album_title,
+        s.genre_id,   g.name          AS genre,
+        (s.lyrics IS NOT NULL AND s.lyrics <> '') AS has_lyrics
       FROM songs s
       LEFT JOIN artists a  ON s.artist_id = a.id
       LEFT JOIN albums  al ON s.album_id  = al.id
+      LEFT JOIN genres  g  ON s.genre_id  = g.id
       ORDER BY s.created_at DESC
-      LIMIT 200
     `);
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    // Fallback: lyrics/genre columns may not exist yet — run without them
+    try {
+      const { rows } = await pool.query(`
+        SELECT s.id, s.title, s.cover_url, s.audiourl,
+               s.duration_seconds, s.play_count, s.is_explicit, s.created_at,
+               COALESCE(s.is_visible, TRUE) AS is_visible,
+               FALSE AS has_lyrics,
+               s.artist_id, a.name AS artist_name,
+               s.album_id,  al.title AS album_title,
+               NULL::integer AS genre_id, NULL::text AS genre
+        FROM songs s
+        LEFT JOIN artists a  ON s.artist_id = a.id
+        LEFT JOIN albums  al ON s.album_id  = al.id
+        ORDER BY s.created_at DESC
+      `);
+      res.json(rows);
+    } catch (e2) { res.status(500).json({ error: e2.message }); }
+  }
 };
 
 exports.addSong = async (req, res) => {
   try {
-    const { title, artist_id, album_id, audiourl, cover_url, duration_seconds } = req.body;
+    const { title, artist_id, album_id, audiourl, cover_url, duration_seconds, is_explicit, genre_id, is_visible } = req.body;
     const { rows } = await pool.query(
-      `INSERT INTO songs (title, artist_id, album_id, audiourl, cover_url, duration_seconds)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title, artist_id || null, album_id || null, audiourl, cover_url || null, parseInt(duration_seconds) || 0]
+      `INSERT INTO songs (title, artist_id, album_id, audiourl, cover_url, duration_seconds, is_explicit, genre_id, is_visible)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [title, artist_id || null, album_id || null, audiourl, cover_url || null,
+       parseInt(duration_seconds) || 0, !!is_explicit, genre_id || null, is_visible !== false]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -166,7 +218,7 @@ exports.deleteSong = async (req, res) => {
 exports.updateSong = async (req, res) => {
   try {
     const { id } = req.params;
-    const allowed = ['title','cover_url','audiourl','duration_seconds','artist_id','album_id','is_explicit','lyrics'];
+    const allowed = ['title','cover_url','audiourl','duration_seconds','artist_id','album_id','is_explicit','lyrics','genre_id','is_visible'];
     const fields = Object.keys(req.body).filter(k => allowed.includes(k));
 
     if (fields.length === 0)
@@ -194,6 +246,14 @@ exports.updateSong = async (req, res) => {
     console.error("updateSong error:", e.message);
     res.status(500).json({ error: e.message });
   }
+};
+
+// ─── Genres (read-only) ───────────────────────────────────────────────────────
+exports.getGenres = async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT id, name FROM genres ORDER BY name ASC`);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 };
 
 // ─── Artists CRUD ─────────────────────────────────────────────────────────────

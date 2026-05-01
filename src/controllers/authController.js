@@ -263,6 +263,7 @@ exports.checkAuth = async (req, res) => {
 
 // ─── Logout ───────────────────────────────────────────────────────────────────
 exports.logout = (req, res) => {
-  res.clearCookie("token");
+  const { maxAge, ...clearOpts } = cookieOptions();
+  res.clearCookie("token", clearOpts);
   res.json({ message: "Logged out successfully" });
 };
