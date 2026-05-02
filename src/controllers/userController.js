@@ -175,6 +175,59 @@ exports.deletePlaylist = async (req, res) => {
   } catch { res.status(500).json({ error:"Failed to delete playlist" }); }
 };
 
+// ─── Playlist Songs ───────────────────────────────────────────────────────────
+exports.getPlaylistSongs = async (req, res) => {
+  try {
+    const email = getEmail(req);
+    if (!email) return res.status(401).json({ error: "Unauthorized" });
+    const { id } = req.params;
+    const own = await pool.query('SELECT id FROM playlists WHERE id=$1 AND user_email=$2', [id, email]);
+    if (!own.rows.length) return res.status(404).json({ error: "Playlist not found" });
+    const r = await pool.query(`
+      SELECT s.id, s.title, s.cover_url, s.duration_seconds,
+             a.name AS artist_name, al.title AS album_title,
+             ps.position, ps.added_at
+      FROM playlist_songs ps
+      JOIN songs s ON ps.song_id = s.id
+      LEFT JOIN artists a ON s.artist_id = a.id
+      LEFT JOIN albums al ON s.album_id = al.id
+      WHERE ps.playlist_id = $1
+      ORDER BY ps.position ASC, ps.added_at ASC
+    `, [id]);
+    res.json(r.rows);
+  } catch { res.status(500).json({ error: "Failed to fetch playlist songs" }); }
+};
+
+exports.addPlaylistSong = async (req, res) => {
+  try {
+    const email = getEmail(req);
+    if (!email) return res.status(401).json({ error: "Unauthorized" });
+    const { id } = req.params;
+    const { songId } = req.body;
+    if (!songId) return res.status(400).json({ error: "songId required" });
+    const own = await pool.query('SELECT id FROM playlists WHERE id=$1 AND user_email=$2', [id, email]);
+    if (!own.rows.length) return res.status(404).json({ error: "Playlist not found" });
+    const pos = await pool.query('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM playlist_songs WHERE playlist_id=$1', [id]);
+    await pool.query(
+      'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES ($1,$2,$3) ON CONFLICT (playlist_id, song_id) DO NOTHING',
+      [id, songId, pos.rows[0].next]
+    );
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Failed to add song" }); }
+};
+
+exports.removePlaylistSong = async (req, res) => {
+  try {
+    const email = getEmail(req);
+    if (!email) return res.status(401).json({ error: "Unauthorized" });
+    const { id, songId } = req.params;
+    const own = await pool.query('SELECT id FROM playlists WHERE id=$1 AND user_email=$2', [id, email]);
+    if (!own.rows.length) return res.status(404).json({ error: "Playlist not found" });
+    await pool.query('DELETE FROM playlist_songs WHERE playlist_id=$1 AND song_id=$2', [id, songId]);
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Failed to remove song" }); }
+};
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 exports.getSessions = async (req, res) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '—';

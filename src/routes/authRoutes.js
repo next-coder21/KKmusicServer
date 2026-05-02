@@ -33,10 +33,14 @@ router.get   ("/search",       authMiddleware, userController.search);
 router.get   ("/sessions",     authMiddleware, userController.getSessions);
 
 // ── Playlists (full CRUD) ─────────────────────────────────────────────────────
-router.get   ("/playlists",     authMiddleware, userController.getPlaylists);
-router.post  ("/playlists",     authMiddleware, userController.createPlaylist);
-router.patch ("/playlists/:id", authMiddleware, userController.updatePlaylist);
-router.delete("/playlists/:id", authMiddleware, userController.deletePlaylist);
+router.get   ("/playlists",                       authMiddleware, userController.getPlaylists);
+router.post  ("/playlists",                       authMiddleware, userController.createPlaylist);
+router.patch ("/playlists/:id",                   authMiddleware, userController.updatePlaylist);
+router.delete("/playlists/:id",                   authMiddleware, userController.deletePlaylist);
+// Playlist songs
+router.get   ("/playlists/:id/songs",             authMiddleware, userController.getPlaylistSongs);
+router.post  ("/playlists/:id/songs",             authMiddleware, userController.addPlaylistSong);
+router.delete("/playlists/:id/songs/:songId",     authMiddleware, userController.removePlaylistSong);
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 router.get   ("/notifications",          authMiddleware, userController.getNotifications);
