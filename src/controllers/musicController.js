@@ -141,6 +141,29 @@ exports.getSongById = async (req, res) => {
   }
 };
 
+// ─── GET songs by album ───────────────────────────────────────────────────────
+exports.getSongsByAlbum = async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT s.id, s.title, s.cover_url, s.audiourl,
+             s.duration_seconds, s.is_explicit, s.play_count,
+             a.name AS artist_name, a.id AS artist_id,
+             al.title AS album_title, al.id AS album_id, al.cover_url AS album_cover,
+             g.name AS genre
+      FROM songs s
+      LEFT JOIN artists a  ON s.artist_id = a.id
+      LEFT JOIN albums  al ON s.album_id  = al.id
+      LEFT JOIN genres  g  ON s.genre_id  = g.id
+      WHERE s.album_id = $1 AND s.is_visible IS NOT FALSE
+      ORDER BY s.title ASC
+    `, [req.params.id]);
+    res.json(rows);
+  } catch (error) {
+    console.error("getSongsByAlbum:", error);
+    res.status(500).json({ error: "Failed to fetch album songs" });
+  }
+};
+
 // ─── Ensure lyrics column exists (called once, cached after) ─────────────────
 let lyricsColumnReady = false;
 async function ensureLyricsColumn() {
@@ -347,5 +370,38 @@ exports.streamAudio = async (req, res) => {
   } catch (error) {
     console.error("streamAudio error:", error.message);
     if (!res.headersSent) res.status(500).json({ error: "Failed to stream audio" });
+  }
+};
+
+// ─── GET cover image (proxy) ──────────────────────────────────────────────────
+// Proxies cover_url so Android's OS image loader (used by MediaSession /
+// lock screen) can fetch it without needing auth or Drive confirmation flows.
+exports.getCoverImage = async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT cover_url FROM songs WHERE id = $1", [req.params.id]
+    );
+    if (!rows.length || !rows[0].cover_url)
+      return res.status(404).json({ error: "Cover not found" });
+
+    let coverUrl = rows[0].cover_url;
+    const driveId = extractDriveId(coverUrl);
+    if (driveId) coverUrl = await resolveDriveUrl(driveId);
+
+    const upstream = await axios({
+      method: "GET",
+      url: coverUrl,
+      responseType: "stream",
+      headers: { "User-Agent": "Mozilla/5.0" },
+      maxRedirects: 5,
+    });
+
+    const ct = upstream.headers["content-type"] || "image/jpeg";
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    upstream.data.pipe(res);
+  } catch (error) {
+    console.error("getCoverImage error:", error.message);
+    if (!res.headersSent) res.status(500).json({ error: "Failed to proxy cover" });
   }
 };
