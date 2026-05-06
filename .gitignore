@@ -32,7 +32,9 @@ Thumbs.db
 
 # Environment files — NEVER commit secrets.
 # Only the example file should be tracked.
-
+.env
+.env.*
+!.env.example
 
 # Misc archives / temp dumps
 *.zip
