@@ -116,16 +116,20 @@ exports.verifySecurityAnswer = async (req, res) => {
       [email.toLowerCase()]
     );
 
+    // Use a generic error for both "no account" and "wrong answer" to prevent
+    // email-enumeration attacks on the password-reset flow.
+    const GENERIC_ERR = 'Invalid email or security keyword';
+
     if (result.rows.length === 0)
-      return res.status(400).json({ error: 'No account found with that email' });
+      return res.status(400).json({ error: GENERIC_ERR });
 
     const storedAnswer = result.rows[0].security_answer;
     if (!storedAnswer)
-      return res.status(400).json({ error: 'No security keyword set for this account' });
+      return res.status(400).json({ error: GENERIC_ERR });
 
     const match = await bcrypt.compare(securityAnswer.trim().toLowerCase(), storedAnswer);
     if (!match)
-      return res.status(400).json({ error: 'Incorrect security keyword' });
+      return res.status(400).json({ error: GENERIC_ERR });
 
     res.json({ message: 'Security keyword verified' });
   } catch (error) {
@@ -148,13 +152,15 @@ exports.resetPassword = async (req, res) => {
       [email.toLowerCase()]
     );
 
+    const GENERIC_RESET_ERR = 'Invalid email or security keyword';
+
     if (result.rows.length === 0)
-      return res.status(400).json({ error: 'User not found' });
+      return res.status(400).json({ error: GENERIC_RESET_ERR });
 
     const storedAnswer = result.rows[0].security_answer;
     const match = await bcrypt.compare(securityAnswer.trim().toLowerCase(), storedAnswer);
     if (!match)
-      return res.status(400).json({ error: 'Incorrect security keyword' });
+      return res.status(400).json({ error: GENERIC_RESET_ERR });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await pool.query(

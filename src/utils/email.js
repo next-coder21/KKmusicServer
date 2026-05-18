@@ -2,7 +2,8 @@ const https = require('https');
 require('dotenv').config();
 
 const MAIL_ENGINE_URL = process.env.MAIL_ENGINE_URL || 'https://lsmailengine.onrender.com';
-const MAIL_API_KEY = process.env.MAIL_API_KEY || 'dandanakka-danakanakka';
+const MAIL_API_KEY = process.env.MAIL_API_KEY;
+if (!MAIL_API_KEY) throw new Error('MAIL_API_KEY env var is required');
 const TIMEOUT_MS = 60000; // 60s to handle Render cold starts (~50s)
 
 function httpPost(path, payload) {

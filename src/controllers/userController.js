@@ -296,7 +296,14 @@ exports.deleteAccount = async (req, res) => {
     await client.query('DELETE FROM user_profiles   WHERE email=$1',      [email]).catch(()=>{});
     await client.query('DELETE FROM users           WHERE email=$1',      [email]);
     await client.query('COMMIT');
-    res.clearCookie("token");
+    // Must pass the same options used when the cookie was set so the
+    // browser/proxy actually clears it (secure + sameSite must match).
+    const clearOpts = {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+    };
+    res.clearCookie("token", clearOpts);
     res.json({ message:"Account deleted successfully" });
   } catch (e) {
     await client.query('ROLLBACK');
