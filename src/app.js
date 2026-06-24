@@ -4,6 +4,11 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
+const path = require("path");
+const {
+  globalLimiter, apiLimiter, adminLimiter,
+  authLimiter, adminAuthLimiter, contactLimiter,
+} = require("./middleware/rateLimiter");
 
 const authRoutes = require("./routes/authRoutes");
 const musicRoutes = require("./routes/musicRoutes");
@@ -74,7 +79,27 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(cookieParser());
 
-// Rate limiting removed — re-enable when needed.
+// ───────────────────────────────────────────────────────────────
+// Rate limiting — Redis-backed, alert emails on breach
+// Tightest limiters registered first (Express matches in order)
+// ───────────────────────────────────────────────────────────────
+app.use("/admin/login",       adminAuthLimiter);
+app.use("/auth/login",        authLimiter);
+app.use("/auth/register",     authLimiter);
+app.use("/auth/contact",      contactLimiter);
+app.use("/admin",             adminLimiter);
+app.use("/auth",              apiLimiter);
+app.use(globalLimiter);       // catch-all safety net
+
+// ───────────────────────────────────────────────────────────────
+// Static files — cover images served directly (no auth needed)
+// ───────────────────────────────────────────────────────────────
+app.use("/covers", express.static(path.join(__dirname, "../public/covers"), {
+  maxAge: "7d",
+  setHeaders: (res) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  },
+}));
 
 // ───────────────────────────────────────────────────────────────
 // Routes
@@ -85,10 +110,32 @@ app.use("/auth/queue", queueRoutes);
 app.use("/auth", favouriteRoute);
 app.use("/admin", adminRoutes);
 
+// Root alive check
+app.get("/", (_req, res) =>
+  res.json({ status: "alive", service: "KKaudioBk — Muves Backend", uptime: process.uptime(), ts: Date.now() })
+);
+
 // Health check (used by uptime monitors / orchestrators).
 app.get("/health", (_req, res) =>
   res.json({ status: "ok", uptime: process.uptime(), ts: Date.now() })
 );
+
+// App version check — mobile clients poll this on startup to detect updates.
+// Configure on Render via env vars:
+//   APP_VERSION        e.g. "1.0.1"
+//   APP_VERSION_CODE   e.g. 2
+//   APP_APK_URL        direct download link to the latest APK
+//   APP_UPDATE_MESSAGE short release notes shown in the update prompt
+//   APP_FORCE_UPDATE   "true" to block the app until updated
+app.get("/version", (_req, res) => {
+  res.json({
+    version:      process.env.APP_VERSION      || "1.0.0",
+    versionCode:  parseInt(process.env.APP_VERSION_CODE || "1", 10),
+    apkUrl:       process.env.APP_APK_URL      || null,
+    message:      process.env.APP_UPDATE_MESSAGE || "Bug fixes and improvements.",
+    forceUpdate:  process.env.APP_FORCE_UPDATE === "true",
+  });
+});
 
 // 404 fallback (only fires for routes the router didn't match).
 app.use((req, res) => {
